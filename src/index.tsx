@@ -1,10 +1,10 @@
-import { instead } from "@vendetta/patcher";
-import { find, findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
+import { logger } from "@vendetta";
+import { registerCommand } from "@vendetta/commands";
+import { ApplicationCommandOptionType, ApplicationCommandInputType } from "@vendetta/commands/types";
 import { General } from "@vendetta/ui/components";
 import { React } from "@vendetta/metro/common";
-import { logger } from "@vendetta";
 
 const { ScrollView, View, Text } = General;
 
@@ -34,11 +34,8 @@ const PLATFORM_LABELS: Record<string, string> = {
     vr: "VR",
 };
 
-const patches: (() => void)[] = [];
-
 function getPlatformOverride() {
-    const platform = settings.platform ?? "desktop";
-    const browser = PLATFORM_BROWSERS[platform];
+    const browser = PLATFORM_BROWSERS[settings.platform ?? "desktop"];
     return browser ? { browser } : null;
 }
 
@@ -78,72 +75,79 @@ export function Settings() {
     );
 }
 
-function debugScanForGatewayModule() {
-    // Scan every currently-loaded module's functions for source text
-    // containing a literal likely tied to the identify/super-properties
-    // payload. Delayed by the caller so the gateway connection (and the
-    // modules involved in building it) has had a chance to actually load.
-    const NEEDLES = ["_doIdentify", "release_channel", "large_threshold", "capabilities"];
-
-    for (const needle of NEEDLES) {
-        const candidate = find(m => {
-            if (!m) return false;
-            for (const key in m) {
-                try {
-                    if (typeof m[key] === "function" && m[key].toString().includes(needle)) {
-                        return true;
-                    }
-                } catch {}
-            }
-            return false;
-        });
-
-        if (candidate) {
-            logger.log(`PlatformSpoofer debug - found candidate module via "${needle}"`);
-            logger.log("keys:", Object.keys(candidate));
-            for (const key of Object.keys(candidate)) {
-                if (typeof candidate[key] === "function" && candidate[key].toString().includes(needle)) {
-                    logger.log(`  fn "${key}" source:`, candidate[key].toString().slice(0, 500));
-                }
-            }
-        } else {
-            logger.log(`PlatformSpoofer debug - no module found for needle "${needle}"`);
-        }
-    }
-}
+let originalSend: typeof WebSocket.prototype.send | null = null;
+let unregisterCommand: (() => void) | null = null;
 
 export default {
     onLoad: () => {
-        const GatewayConnectionProperties = findByProps("getStandardUserAgent", "browserVersion")
-            ?? findByProps("browserVersion", "os");
-
-        if (!GatewayConnectionProperties) {
-            showToast("PlatformSpoofer: scanning in 8s, check debug logs after");
-            // Delay so the app has time to actually connect to the gateway
-            // and load the relevant modules before we scan for them.
-            setTimeout(debugScanForGatewayModule, 8000);
-            return;
-        }
-
-        logger.log("PlatformSpoofer - matched module keys:", Object.keys(GatewayConnectionProperties));
-        for (const key of Object.keys(GatewayConnectionProperties)) {
-            const val = GatewayConnectionProperties[key];
-            if (typeof val !== "function") continue;
-            patches.push(
-                instead(key, GatewayConnectionProperties, (args, orig) => {
-                    const result = orig(...args);
-                    if (result && typeof result === "object" && "browser" in result) {
-                        logger.log(`PlatformSpoofer - patched fn "${key}" returned:`, result);
-                        return { ...result, ...getPlatformOverride() };
+        // --- WebSocket IDENTIFY patch ---
+        originalSend = WebSocket.prototype.send;
+        WebSocket.prototype.send = function (data: any) {
+            try {
+                if (typeof data === "string") {
+                    const parsed = JSON.parse(data);
+                    if (parsed?.op === 2 && parsed?.d?.properties) {
+                        logger.log("PlatformSpoofer - intercepted IDENTIFY, original properties:", parsed.d.properties);
+                        parsed.d.properties = { ...parsed.d.properties, ...getPlatformOverride() };
+                        logger.log("PlatformSpoofer - patched properties:", parsed.d.properties);
+                        data = JSON.stringify(parsed);
                     }
-                    return result;
-                })
-            );
-        }
+                }
+            } catch {}
+            return originalSend!.call(this, data);
+        };
+
+        // --- /platform slash command ---
+        unregisterCommand = registerCommand({
+            name: "platform",
+            displayName: "platform",
+            description: "Set which platform Discord reports you as (spoofed)",
+            displayDescription: "Set which platform Discord reports you as (spoofed)",
+            inputType: ApplicationCommandInputType.BUILT_IN,
+            applicationId: "-1",
+            type: 1,
+            options: [
+                {
+                    name: "value",
+                    displayName: "value",
+                    description: "Platform to spoof",
+                    displayDescription: "Platform to spoof",
+                    type: ApplicationCommandOptionType.STRING,
+                    required: true,
+                    choices: Object.entries(PLATFORM_LABELS).map(([value, label]) => ({
+                        name: label,
+                        displayName: label,
+                        value,
+                    })),
+                },
+            ],
+            execute: (args, ctx) => {
+                const value = args.find(a => a.name === "value")?.value as string | undefined;
+                if (!value || !PLATFORM_LABELS[value]) {
+                    showToast("PlatformSpoofer: invalid platform");
+                    return {
+                        content: "Invalid platform value.",
+                    };
+                }
+                settings.platform = value;
+                showToast(`Platform set to ${PLATFORM_LABELS[value]} — restart to apply`);
+                return {
+                    content: `Platform spoof set to **${PLATFORM_LABELS[value]}**. Restart Discord for it to take effect.`,
+                };
+            },
+        });
+
+        showToast("PlatformSpoofer loaded — watching for IDENTIFY");
     },
     onUnload: () => {
-        for (const p of patches) p();
-        patches.length = 0;
+        if (originalSend) {
+            WebSocket.prototype.send = originalSend;
+            originalSend = null;
+        }
+        if (unregisterCommand) {
+            unregisterCommand();
+            unregisterCommand = null;
+        }
     },
     settings: Settings,
 };
