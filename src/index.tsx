@@ -79,8 +79,11 @@ export function Settings() {
 }
 
 function debugScanForGatewayModule() {
-    
-    const NEEDLES = ["release_channel", "os_version", "client_build_number", "browser_user_agent"];
+    // Scan every currently-loaded module's functions for source text
+    // containing a literal likely tied to the identify/super-properties
+    // payload. Delayed by the caller so the gateway connection (and the
+    // modules involved in building it) has had a chance to actually load.
+    const NEEDLES = ["_doIdentify", "release_channel", "large_threshold", "capabilities"];
 
     for (const needle of NEEDLES) {
         const candidate = find(m => {
@@ -115,13 +118,14 @@ export default {
             ?? findByProps("browserVersion", "os");
 
         if (!GatewayConnectionProperties) {
-            showToast("PlatformSpoofer: still searching, check debug logs");
-            debugScanForGatewayModule();
+            showToast("PlatformSpoofer: scanning in 8s, check debug logs after");
+            // Delay so the app has time to actually connect to the gateway
+            // and load the relevant modules before we scan for them.
+            setTimeout(debugScanForGatewayModule, 8000);
             return;
         }
 
         logger.log("PlatformSpoofer - matched module keys:", Object.keys(GatewayConnectionProperties));
-
         for (const key of Object.keys(GatewayConnectionProperties)) {
             const val = GatewayConnectionProperties[key];
             if (typeof val !== "function") continue;
