@@ -2,7 +2,6 @@ import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";
 import { registerCommand } from "@vendetta/commands";
-import { ApplicationCommandOptionType, ApplicationCommandInputType } from "@vendetta/commands/types";
 import { React } from "@vendetta/metro/common";
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 
@@ -32,37 +31,23 @@ const PLATFORM_LABELS: Record<string, string> = {
     vr: "VR",
 };
 
+// Raw Discord application-command API constants (public/stable, not a
+// Kettu-internal guess): input type BUILT_IN = 1, option type STRING = 3.
+const INPUT_TYPE_BUILT_IN = 1;
+const OPTION_TYPE_STRING = 3;
+
 function getPlatformOverride() {
     const browser = PLATFORM_BROWSERS[settings.platform ?? "desktop"];
     return browser ? { browser } : null;
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        padding: 16,
-    },
-    description: {
-        color: "#dcddde",
-        marginBottom: 16,
-        fontSize: 14,
-    },
-    option: {
-        padding: 12,
-        marginBottom: 8,
-        borderRadius: 8,
-        backgroundColor: "#2b2d31",
-    },
-    optionActive: {
-        backgroundColor: "#5865F2",
-    },
-    optionText: {
-        color: "#fff",
-        fontSize: 15,
-    },
-    optionTextActive: {
-        fontWeight: "700",
-    },
+    container: { flex: 1, padding: 16 },
+    description: { color: "#dcddde", marginBottom: 16, fontSize: 14 },
+    option: { padding: 12, marginBottom: 8, borderRadius: 8, backgroundColor: "#2b2d31" },
+    optionActive: { backgroundColor: "#5865F2" },
+    optionText: { color: "#fff", fontSize: 15 },
+    optionTextActive: { fontWeight: "700" },
 });
 
 export function Settings() {
@@ -102,58 +87,66 @@ let unregisterCommand: (() => void) | null = null;
 
 export default {
     onLoad: () => {
-        originalSend = WebSocket.prototype.send;
-        WebSocket.prototype.send = function (data: any) {
-            try {
-                if (typeof data === "string") {
-                    const parsed = JSON.parse(data);
-                    if (parsed?.op === 2 && parsed?.d?.properties) {
-                        logger.log("PlatformSpoofer - intercepted IDENTIFY, original properties:", parsed.d.properties);
-                        parsed.d.properties = { ...parsed.d.properties, ...getPlatformOverride() };
-                        logger.log("PlatformSpoofer - patched properties:", parsed.d.properties);
-                        data = JSON.stringify(parsed);
+        try {
+            originalSend = WebSocket.prototype.send;
+            WebSocket.prototype.send = function (data: any) {
+                try {
+                    if (typeof data === "string") {
+                        const parsed = JSON.parse(data);
+                        if (parsed?.op === 2 && parsed?.d?.properties) {
+                            logger.log("PlatformSpoofer - intercepted IDENTIFY, original properties:", parsed.d.properties);
+                            parsed.d.properties = { ...parsed.d.properties, ...getPlatformOverride() };
+                            logger.log("PlatformSpoofer - patched properties:", parsed.d.properties);
+                            data = JSON.stringify(parsed);
+                        }
                     }
-                }
-            } catch {}
-            return originalSend!.call(this, data);
-        };
+                } catch {}
+                return originalSend!.call(this, data);
+            };
+        } catch (e) {
+            logger.log("PlatformSpoofer - failed to patch WebSocket.send:", e);
+        }
 
-        unregisterCommand = registerCommand({
-            name: "platform",
-            displayName: "platform",
-            description: "Set which platform Discord reports you as (spoofed)",
-            displayDescription: "Set which platform Discord reports you as (spoofed)",
-            inputType: ApplicationCommandInputType.BUILT_IN,
-            applicationId: "-1",
-            type: 1,
-            options: [
-                {
-                    name: "value",
-                    displayName: "value",
-                    description: "Platform to spoof",
-                    displayDescription: "Platform to spoof",
-                    type: ApplicationCommandOptionType.STRING,
-                    required: true,
-                    choices: Object.entries(PLATFORM_LABELS).map(([value, label]) => ({
-                        name: label,
-                        displayName: label,
-                        value,
-                    })),
+        try {
+            unregisterCommand = registerCommand({
+                name: "platform",
+                displayName: "platform",
+                description: "Set which platform Discord reports you as (spoofed)",
+                displayDescription: "Set which platform Discord reports you as (spoofed)",
+                inputType: INPUT_TYPE_BUILT_IN,
+                applicationId: "-1",
+                type: 1,
+                options: [
+                    {
+                        name: "value",
+                        displayName: "value",
+                        description: "Platform to spoof",
+                        displayDescription: "Platform to spoof",
+                        type: OPTION_TYPE_STRING,
+                        required: true,
+                        choices: Object.entries(PLATFORM_LABELS).map(([value, label]) => ({
+                            name: label,
+                            displayName: label,
+                            value,
+                        })),
+                    },
+                ],
+                execute: (args, ctx) => {
+                    const value = args.find((a: any) => a.name === "value")?.value as string | undefined;
+                    if (!value || !PLATFORM_LABELS[value]) {
+                        showToast("PlatformSpoofer: invalid platform");
+                        return { content: "Invalid platform value." };
+                    }
+                    settings.platform = value;
+                    showToast(`Platform set to ${PLATFORM_LABELS[value]} — restart to apply`);
+                    return {
+                        content: `Platform spoof set to **${PLATFORM_LABELS[value]}**. Restart Discord for it to take effect.`,
+                    };
                 },
-            ],
-            execute: (args, ctx) => {
-                const value = args.find(a => a.name === "value")?.value as string | undefined;
-                if (!value || !PLATFORM_LABELS[value]) {
-                    showToast("PlatformSpoofer: invalid platform");
-                    return { content: "Invalid platform value." };
-                }
-                settings.platform = value;
-                showToast(`Platform set to ${PLATFORM_LABELS[value]} — restart to apply`);
-                return {
-                    content: `Platform spoof set to **${PLATFORM_LABELS[value]}**. Restart Discord for it to take effect.`,
-                };
-            },
-        });
+            });
+        } catch (e) {
+            logger.log("PlatformSpoofer - failed to register /platform command:", e);
+        }
 
         showToast("PlatformSpoofer loaded — watching for IDENTIFY");
     },
