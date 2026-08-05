@@ -1,5 +1,5 @@
 import { instead } from "@vendetta/patcher";
-import { findByProps } from "@vendetta/metro";
+import { find, findByProps } from "@vendetta/metro";
 import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { General } from "@vendetta/ui/components";
@@ -78,28 +78,45 @@ export function Settings() {
     );
 }
 
+function debugScanForGatewayModule() {
+    
+    const NEEDLES = ["release_channel", "os_version", "client_build_number", "browser_user_agent"];
+
+    for (const needle of NEEDLES) {
+        const candidate = find(m => {
+            if (!m) return false;
+            for (const key in m) {
+                try {
+                    if (typeof m[key] === "function" && m[key].toString().includes(needle)) {
+                        return true;
+                    }
+                } catch {}
+            }
+            return false;
+        });
+
+        if (candidate) {
+            logger.log(`PlatformSpoofer debug - found candidate module via "${needle}"`);
+            logger.log("keys:", Object.keys(candidate));
+            for (const key of Object.keys(candidate)) {
+                if (typeof candidate[key] === "function" && candidate[key].toString().includes(needle)) {
+                    logger.log(`  fn "${key}" source:`, candidate[key].toString().slice(0, 500));
+                }
+            }
+        } else {
+            logger.log(`PlatformSpoofer debug - no module found for needle "${needle}"`);
+        }
+    }
+}
+
 export default {
     onLoad: () => {
         const GatewayConnectionProperties = findByProps("getStandardUserAgent", "browserVersion")
             ?? findByProps("browserVersion", "os");
 
         if (!GatewayConnectionProperties) {
-            showToast("PlatformSpoofer: couldn't find the gateway properties module");
-
-            
-            const debugCandidates = findByProps("browser", "os");
-            logger.log("PlatformSpoofer debug - findByProps('browser','os'):", debugCandidates);
-            if (debugCandidates) {
-                logger.log("PlatformSpoofer debug - keys:", Object.keys(debugCandidates));
-            }
-
-            const debugCandidates2 = findByProps("release_channel");
-            logger.log("PlatformSpoofer debug - findByProps('release_channel'):", debugCandidates2);
-            if (debugCandidates2) {
-                logger.log("PlatformSpoofer debug - keys:", Object.keys(debugCandidates2));
-            }
-            
-
+            showToast("PlatformSpoofer: still searching, check debug logs");
+            debugScanForGatewayModule();
             return;
         }
 
