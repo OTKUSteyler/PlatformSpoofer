@@ -1,10 +1,10 @@
 {
-    "name": "Template Plugin",
-    "description": "A plugin for use as a template.",
+    "name": "PlatformSpoofer",
+    "description": "Spoof what platform or device shows up on your Discord status. Use sparingly — frequent or suspicious use may get your account flagged or banned.",
     "authors": [
         {
-            "name": "You!",
-            "id": "YOUR_ID_HERE"
+            "name": "btmc727",
+            "id": "554071670143451176"
         }
     ],
     "main": "src/index.ts",
