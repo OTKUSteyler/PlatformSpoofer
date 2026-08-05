@@ -3,10 +3,8 @@ import { showToast } from "@vendetta/ui/toasts";
 import { logger } from "@vendetta";
 import { registerCommand } from "@vendetta/commands";
 import { ApplicationCommandOptionType, ApplicationCommandInputType } from "@vendetta/commands/types";
-import { General } from "@vendetta/ui/components";
 import { React } from "@vendetta/metro/common";
-
-const { ScrollView, View, Text } = General;
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from "react-native";
 
 interface PlatformSpooferStorage {
     platform?: string;
@@ -39,36 +37,60 @@ function getPlatformOverride() {
     return browser ? { browser } : null;
 }
 
+const styles = StyleSheet.create({
+    container: {
+        flex: 1,
+        padding: 16,
+    },
+    description: {
+        color: "#dcddde",
+        marginBottom: 16,
+        fontSize: 14,
+    },
+    option: {
+        padding: 12,
+        marginBottom: 8,
+        borderRadius: 8,
+        backgroundColor: "#2b2d31",
+    },
+    optionActive: {
+        backgroundColor: "#5865F2",
+    },
+    optionText: {
+        color: "#fff",
+        fontSize: 15,
+    },
+    optionTextActive: {
+        fontWeight: "700",
+    },
+});
+
 export function Settings() {
     const [current, setCurrent] = React.useState(settings.platform ?? "desktop");
 
     return (
-        <ScrollView style={{ flex: 1, padding: 16 }}>
-            <Text style={{ marginBottom: 12 }}>
+        <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 32 }}>
+            <Text style={styles.description}>
                 Choose which platform Discord reports you as. Requires a restart to take effect.
                 Use sparingly — frequent use may get your account flagged.
             </Text>
             {Object.entries(PLATFORM_LABELS).map(([value, label]) => {
                 const active = current === value;
                 return (
-                    <View
+                    <TouchableOpacity
                         key={value}
-                        style={{
-                            padding: 12,
-                            marginBottom: 8,
-                            borderRadius: 8,
-                            backgroundColor: active ? "#5865F2" : "#2b2d31",
-                        }}
-                        onTouchEnd={() => {
+                        activeOpacity={0.7}
+                        style={[styles.option, active && styles.optionActive]}
+                        onPress={() => {
                             settings.platform = value;
                             setCurrent(value);
                             showToast(`Platform set to ${label} — restart to apply`);
                         }}
                     >
-                        <Text style={{ color: "#fff", fontWeight: active ? "700" : "400" }}>
+                        <Text style={[styles.optionText, active && styles.optionTextActive]}>
                             {label}{active ? " (current)" : ""}
                         </Text>
-                    </View>
+                    </TouchableOpacity>
                 );
             })}
         </ScrollView>
@@ -80,7 +102,6 @@ let unregisterCommand: (() => void) | null = null;
 
 export default {
     onLoad: () => {
-        // --- WebSocket IDENTIFY patch ---
         originalSend = WebSocket.prototype.send;
         WebSocket.prototype.send = function (data: any) {
             try {
@@ -97,7 +118,6 @@ export default {
             return originalSend!.call(this, data);
         };
 
-        // --- /platform slash command ---
         unregisterCommand = registerCommand({
             name: "platform",
             displayName: "platform",
@@ -125,9 +145,7 @@ export default {
                 const value = args.find(a => a.name === "value")?.value as string | undefined;
                 if (!value || !PLATFORM_LABELS[value]) {
                     showToast("PlatformSpoofer: invalid platform");
-                    return {
-                        content: "Invalid platform value.",
-                    };
+                    return { content: "Invalid platform value." };
                 }
                 settings.platform = value;
                 showToast(`Platform set to ${PLATFORM_LABELS[value]} — restart to apply`);
