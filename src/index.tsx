@@ -4,6 +4,7 @@ import { storage } from "@vendetta/plugin";
 import { showToast } from "@vendetta/ui/toasts";
 import { General } from "@vendetta/ui/components";
 import { React } from "@vendetta/metro/common";
+import { logger } from "@vendetta";
 
 const { ScrollView, View, Text } = General;
 
@@ -40,7 +41,6 @@ function getPlatformOverride() {
     const browser = PLATFORM_BROWSERS[platform];
     return browser ? { browser } : null;
 }
-
 
 export function Settings() {
     const [current, setCurrent] = React.useState(settings.platform ?? "desktop");
@@ -85,8 +85,25 @@ export default {
 
         if (!GatewayConnectionProperties) {
             showToast("PlatformSpoofer: couldn't find the gateway properties module");
+
+            
+            const debugCandidates = findByProps("browser", "os");
+            logger.log("PlatformSpoofer debug - findByProps('browser','os'):", debugCandidates);
+            if (debugCandidates) {
+                logger.log("PlatformSpoofer debug - keys:", Object.keys(debugCandidates));
+            }
+
+            const debugCandidates2 = findByProps("release_channel");
+            logger.log("PlatformSpoofer debug - findByProps('release_channel'):", debugCandidates2);
+            if (debugCandidates2) {
+                logger.log("PlatformSpoofer debug - keys:", Object.keys(debugCandidates2));
+            }
+            
+
             return;
         }
+
+        logger.log("PlatformSpoofer - matched module keys:", Object.keys(GatewayConnectionProperties));
 
         for (const key of Object.keys(GatewayConnectionProperties)) {
             const val = GatewayConnectionProperties[key];
@@ -95,6 +112,7 @@ export default {
                 instead(key, GatewayConnectionProperties, (args, orig) => {
                     const result = orig(...args);
                     if (result && typeof result === "object" && "browser" in result) {
+                        logger.log(`PlatformSpoofer - patched fn "${key}" returned:`, result);
                         return { ...result, ...getPlatformOverride() };
                     }
                     return result;
